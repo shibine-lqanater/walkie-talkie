@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>لاسلكي — إنتركم إنتاج</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<style>
+  :root{
+    --bg: #12140d;
+    --panel: #1c2116;
+    --panel-light: #262d1c;
+    --amber: #f2a900;
+    --amber-dim: #8a6205;
+    --red: #e2483d;
+    --red-dim: #6e211c;
+    --green: #7cb342;
+    --green-dim: #3d5a1f;
+    --cream: #eae4d3;
+    --muted: #8a8a72;
+    --lcd-bg: #0e1509;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; min-height:100vh;
+    background: radial-gradient(ellipse at 50% -10%, #262c1a 0%, var(--bg) 60%);
+    font-family: 'Cairo', sans-serif;
+    color: var(--cream);
+    display:flex; align-items:center; justify-content:center;
+    padding: 32px 16px;
+  }
+  .device{
+    width: 100%;
+    max-width: 380px;
+    background: linear-gradient(180deg, var(--panel) 0%, #171a10 100%);
+    border-radius: 28px;
+    border: 1px solid #363c28;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04);
+    padding: 20px 20px 28px;
+    position: relative;
+  }
+  .antenna{
+    position:absolute; top:-38px; right: 34px;
+    width: 6px; height: 46px;
+    background: linear-gradient(180deg, #4a5236, #1a1d12);
+    border-radius: 3px;
+    transform: rotate(8deg);
+  }
+  .antenna::after{
+    content:''; position:absolute; top:-6px; left:-2px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--amber-dim);
+  }
+  .brand-row{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom: 14px; padding: 0 4px;
+  }
+  .brand{
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px; letter-spacing: 3px; color: var(--muted);
+  }
+  .led{
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--muted);
+    transition: all .2s ease;
+  }
+  .led.on{ background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .led.tx{ background: var(--red); box-shadow: 0 0 10px var(--red); }
+
+  .screen{
+    background: var(--lcd-bg);
+    border-radius: 14px;
+    border: 1px solid #2a3320;
+    padding: 16px 16px 12px;
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.6);
+    margin-bottom: 18px;
+  }
+  .screen-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;}
+  .screen-label{ font-size: 11px; color: var(--amber-dim); letter-spacing: 2px; }
+  .channel-code{
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 30px; letter-spacing: 4px; color: var(--amber);
+    text-shadow: 0 0 12px rgba(242,169,0,0.35);
+  }
+  .status-text{
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px; color: var(--green);
+    min-height: 18px;
+  }
+  .status-text.warn{ color: var(--amber); }
+  .status-text.err{ color: var(--red); }
+
+  #bars{
+    display:flex; align-items:flex-end; gap: 3px; height: 30px; margin-top: 10px;
+  }
+  #bars div{
+    flex:1; background: var(--amber-dim); border-radius: 2px 2px 0 0;
+    height: 3px; transition: height .06s linear, background .06s linear;
+  }
+
+  .setup{ display:flex; flex-direction:column; gap: 12px; }
+  .setup label{ font-size: 13px; color: var(--muted); padding: 0 2px; }
+  .setup input{
+    width:100%; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid #3a4128; background: var(--panel-light);
+    color: var(--cream); font-family: 'Share Tech Mono', monospace;
+    font-size: 18px; letter-spacing: 3px; text-align:center;
+    outline: none;
+  }
+  .setup input:focus{ border-color: var(--amber-dim); }
+  .row-2{ display:flex; gap:10px; }
+  .row-2 > *{ flex:1; }
+
+  button{
+    font-family:'Cairo', sans-serif; font-weight:700; cursor:pointer;
+    border:none; border-radius: 10px;
+  }
+  .btn-primary{
+    background: linear-gradient(180deg, var(--amber), #c98a00);
+    color: #1a1300; padding: 13px; font-size: 15px;
+  }
+  .btn-secondary{
+    background: var(--panel-light); color: var(--cream);
+    border: 1px solid #3a4128; padding: 13px; font-size: 15px;
+  }
+  .btn-primary:active, .btn-secondary:active{ transform: scale(0.98); }
+
+  .link-wrap{ display:flex; flex-direction:column; align-items:center; gap: 16px; margin-top: 6px;}
+  .link-badge{
+    display:flex; align-items:center; gap: 10px;
+    padding: 12px 20px; border-radius: 12px;
+    background: var(--panel-light); border: 1px solid #3a4128;
+    width: 100%; justify-content:center;
+  }
+  .link-badge .dot{
+    width: 10px; height:10px; border-radius:50%;
+    background: var(--green); box-shadow: 0 0 8px var(--green);
+  }
+  .link-badge span{
+    font-family:'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 1.5px;
+  }
+
+  .mute-btn{
+    width: 148px; height:148px; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #3a4a2a, #1e2814 70%);
+    border: 3px solid var(--green-dim);
+    display:flex; align-items:center; justify-content:center;
+    flex-direction:column; gap:6px;
+    user-select:none; -webkit-user-select:none;
+    transition: all .1s ease;
+    box-shadow: 0 6px 0 #10130a, 0 10px 18px rgba(0,0,0,0.5), 0 0 18px rgba(124,179,66,0.2);
+    cursor: pointer;
+  }
+  .mute-btn:active{ transform: translateY(3px); box-shadow: 0 3px 0 #10130a, 0 6px 12px rgba(0,0,0,0.5); }
+  .mute-btn.muted{
+    background: radial-gradient(circle at 35% 30%, var(--red), #7a221c 70%);
+    border-color: var(--red);
+    box-shadow: 0 6px 0 #10130a, 0 10px 18px rgba(0,0,0,0.5);
+  }
+  .mute-icon{ font-size: 30px; }
+  .mute-label{
+    font-family:'Share Tech Mono', monospace; font-size: 12px;
+    letter-spacing: 2px; color: var(--green);
+  }
+  .mute-btn.muted .mute-label{ color: #ffd9d5; }
+
+  .hint{ text-align:center; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .hidden{ display:none !important; }
+
+  .footer-note{
+    margin-top: 22px; font-size: 11.5px; color: var(--muted);
+    line-height: 1.8; text-align: center; padding: 0 6px;
+  }
+  .footer-note b{ color: var(--amber-dim); }
+
+  .end-btn{
+    margin-top: 16px; width:100%; background: transparent;
+    color: var(--red); border: 1px solid var(--red-dim); padding: 10px; font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<div class="device">
+  <div class="antenna"></div>
+  <div class="brand-row">
+    <span class="brand">لاسلكي · إنتركم</span>
+    <div class="led" id="led"></div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-row">
+      <span class="screen-label">القناة</span>
+      <span class="screen-label" id="peerCountLabel">—</span>
+    </div>
+    <div class="channel-code" id="channelDisplay">----</div>
+    <div class="status-text" id="statusText">جاهز للاتصال</div>
+    <div id="bars"></div>
+  </div>
+
+  <div id="setupView" class="setup">
+    <div>
+      <label for="channelInput">أدخل رقم القناة (يستخدمه الطرفان معًا)</label>
+      <input id="channelInput" maxlength="6" placeholder="مثال: 4521" inputmode="numeric">
+    </div>
+    <div class="row-2">
+      <button class="btn-secondary" id="randomBtn" type="button">قناة عشوائية</button>
+      <button class="btn-primary" id="connectBtn" type="button">دخول القناة</button>
+    </div>
+    <p class="hint">يفتح المخرج والمصور نفس الرابط، ويدخل كل واحد نفس رقم القناة.</p>
+  </div>
+
+  <div id="radioView" class="hidden">
+    <div class="link-wrap">
+      <div class="link-badge">
+        <div class="dot"></div>
+        <span>خط مفتوح — كلام مباشر بدون أزرار</span>
+      </div>
+      <div class="mute-btn" id="muteBtn">
+        <span class="mute-icon" id="muteIcon">🎙</span>
+        <span class="mute-label" id="muteLabel">صوتك مفتوح</span>
+      </div>
+      <p class="hint">اضغط الزر لكتم صوتك مؤقتًا فقط — الاستماع يفضل شغّال دايمًا</p>
+    </div>
+    <button class="end-btn" id="endBtn" type="button">إنهاء الاتصال</button>
+  </div>
+
+  <div class="footer-note">
+    الخط يفضل مفتوح تلقائيًا في الاتجاهين طول مدة الاتصال، مفيش داعي لمسك أي زرار وانت بتصوّر.
+    الاتصال عبر <b>WebRTC</b> مباشرة بين المتصفحَين، ويحتاج <b>HTTPS</b> وإذن الميكروفون.
+  </div>
+</div>
+
+<audio id="remoteAudio" autoplay playsinline></audio>
+
+<script>
+const channelInput = document.getElementById('channelInput');
+const connectBtn = document.getElementById('connectBtn');
+const randomBtn = document.getElementById('randomBtn');
+const endBtn = document.getElementById('endBtn');
+const setupView = document.getElementById('setupView');
+const radioView = document.getElementById('radioView');
+const channelDisplay = document.getElementById('channelDisplay');
+const statusText = document.getElementById('statusText');
+const peerCountLabel = document.getElementById('peerCountLabel');
+const led = document.getElementById('led');
+const muteBtn = document.getElementById('muteBtn');
+const muteIcon = document.getElementById('muteIcon');
+const muteLabel = document.getElementById('muteLabel');
+const remoteAudio = document.getElementById('remoteAudio');
+const barsWrap = document.getElementById('bars');
+
+const BAR_COUNT = 28;
+for (let i = 0; i < BAR_COUNT; i++) {
+  barsWrap.appendChild(document.createElement('div'));
+}
+const barEls = barsWrap.children;
+
+let peer = null;
+let call = null;
+let localStream = null;
+let audioCtx = null;
+let analyserLocal = null;
+let analyserRemote = null;
+let animId = null;
+let isMuted = false;
+let connected = false;
+
+function setStatus(text, kind) {
+  statusText.textContent = text;
+  statusText.className = 'status-text' + (kind ? ' ' + kind : '');
+}
+
+function randomChannel() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+randomBtn.addEventListener('click', () => {
+  channelInput.value = randomChannel();
+});
+
+channelInput.addEventListener('input', () => {
+  channelInput.value = channelInput.value.replace(/[^0-9]/g, '');
+});
+
+async function getMic() {
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    return true;
+  } catch (err) {
+    setStatus('تعذر الوصول إلى الميكروفون', 'err');
+    return false;
+  }
+}
+
+function setupAnalysers() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (localStream) {
+    const src = audioCtx.createMediaStreamSource(localStream);
+    analyserLocal = audioCtx.createAnalyser();
+    analyserLocal.fftSize = 64;
+    src.connect(analyserLocal);
+  }
+  drawLoop();
+}
+
+function attachRemoteAnalyser(stream) {
+  if (!audioCtx) return;
+  const src = audioCtx.createMediaStreamSource(stream);
+  analyserRemote = audioCtx.createAnalyser();
+  analyserRemote.fftSize = 64;
+  src.connect(analyserRemote);
+}
+
+function avgLevel(analyser) {
+  if (!analyser) return 0;
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) sum += data[i];
+  return sum / data.length;
+}
+
+function drawLoop() {
+  const localLevel = isMuted ? 0 : avgLevel(analyserLocal);
+  const remoteLevel = avgLevel(analyserRemote);
+  const speaking = localLevel > 14 && localLevel >= remoteLevel;
+  const source = speaking ? analyserLocal : analyserRemote;
+
+  setLed(speaking ? 'tx' : (connected ? 'on' : null));
+
+  let data = new Uint8Array(32);
+  if (source) {
+    data = new Uint8Array(source.frequencyBinCount);
+    source.getByteFrequencyData(data);
+  }
+  const step = Math.max(1, Math.floor(data.length / BAR_COUNT));
+  for (let i = 0; i < BAR_COUNT; i++) {
+    const v = data[i * step] || 0;
+    const h = Math.max(3, (v / 255) * 28);
+    const el = barEls[i];
+    el.style.height = h + 'px';
+    el.style.background = speaking ? 'var(--red)' : (v > 12 ? 'var(--amber)' : 'var(--amber-dim)');
+  }
+  animId = requestAnimationFrame(drawLoop);
+}
+
+function setLed(state) {
+  led.className = 'led' + (state === 'tx' ? ' tx' : state === 'on' ? ' on' : '');
+}
+
+function goRadioView(code) {
+  setupView.classList.add('hidden');
+  radioView.classList.remove('hidden');
+  channelDisplay.textContent = code;
+}
+
+function handleRemoteStream(stream) {
+  remoteAudio.srcObject = stream;
+  attachRemoteAnalyser(stream);
+  connected = true;
+  peerCountLabel.textContent = '2 متصلين';
+  setLed('on');
+  setStatus('الخط مفتوح — كلام مباشر', null);
+}
+
+function wireCallEvents(c) {
+  call = c;
+  call.on('stream', handleRemoteStream);
+  call.on('close', () => {
+    connected = false;
+    peerCountLabel.textContent = '—';
+    setLed(null);
+    setStatus('انتهى الاتصال بالطرف الآخر', 'warn');
+  });
+  call.on('error', () => {
+    setStatus('حدث خطأ في الاتصال', 'err');
+  });
+}
+
+async function startChannel(code) {
+  const ok = await getMic();
+  if (!ok) return;
+
+  setStatus('جاري الاتصال بالقناة ' + code + '…', 'warn');
+  goRadioView(code);
+  setupAnalysers();
+
+  peer = new Peer('lx1-' + code, {
+    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+  });
+
+  peer.on('open', () => {
+    setStatus('بانتظار انضمام الطرف الآخر…', 'warn');
+  });
+
+  peer.on('call', (incoming) => {
+    incoming.answer(localStream);
+    wireCallEvents(incoming);
+  });
+
+  peer.on('error', (err) => {
+    if (err.type === 'unavailable-id') {
+      peer.destroy();
+      joinChannel(code);
+    } else if (err.type === 'peer-unavailable') {
+      setStatus('لم يتم العثور على الطرف الآخر بعد', 'warn');
+    } else {
+      setStatus('خطأ في الشبكة: ' + err.type, 'err');
+    }
+  });
+}
+
+function joinChannel(code) {
+  peer = new Peer({
+    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+  });
+
+  peer.on('open', () => {
+    setStatus('جاري الانضمام إلى القناة ' + code + '…', 'warn');
+    const outgoing = peer.call('lx1-' + code, localStream);
+    wireCallEvents(outgoing);
+  });
+
+  peer.on('error', (err) => {
+    setStatus('خطأ في الشبكة: ' + err.type, 'err');
+  });
+}
+
+connectBtn.addEventListener('click', () => {
+  const code = channelInput.value.trim();
+  if (!code || code.length < 4) {
+    setStatus('أدخل رقم قناة من 4 أرقام على الأقل', 'err');
+    return;
+  }
+  startChannel(code);
+});
+
+function setMuted(muted) {
+  isMuted = muted;
+  if (localStream) {
+    localStream.getAudioTracks().forEach(t => t.enabled = !muted);
+  }
+  muteBtn.classList.toggle('muted', muted);
+  muteIcon.textContent = muted ? '🔇' : '🎙';
+  muteLabel.textContent = muted ? 'صوتك مكتوم' : 'صوتك مفتوح';
+}
+
+muteBtn.addEventListener('click', () => setMuted(!isMuted));
+
+endBtn.addEventListener('click', () => {
+  if (call) call.close();
+  if (peer) peer.destroy();
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  if (animId) cancelAnimationFrame(animId);
+  if (audioCtx) audioCtx.close();
+  connected = false;
+  isMuted = false;
+  setupView.classList.remove('hidden');
+  radioView.classList.add('hidden');
+  channelDisplay.textContent = '----';
+  peerCountLabel.textContent = '—';
+  setLed(null);
+  setStatus('جاهز للاتصال', null);
+  muteBtn.classList.remove('muted');
+  muteIcon.textContent = '🎙';
+  muteLabel.textContent = 'صوتك مفتوح';
+});
+</script>
+</body>
+</html>
