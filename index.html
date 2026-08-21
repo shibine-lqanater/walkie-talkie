@@ -296,6 +296,11 @@ let analyserRemote = null;
 let animId = null;
 let isMuted = false;
 let connected = false;
+let currentCode = null;
+let currentRole = null; // 'host' or 'join'
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+let reconnectTimer = null;
 
 function setStatus(text, kind) {
   statusText.textContent = text;
@@ -440,19 +445,30 @@ function wireCallEvents(c) {
 }
 
 async function startChannel(code) {
+  currentCode = code;
+  currentRole = 'host';
   const ok = await getMic();
   if (!ok) return;
 
   setStatus('جاري الاتصال بالقناة ' + code + '…', 'warn');
   goRadioView(code);
   setupAnalysers();
+  openPeerAsHost(code);
+}
 
+function openPeerAsHost(code) {
   peer = new Peer('lx1-' + code, {
     config: { iceServers: ICE_SERVERS }
   });
 
   peer.on('open', () => {
+    reconnectAttempts = 0;
     setStatus('بانتظار انضمام الطرف الآخر…', 'warn');
+  });
+
+  peer.on('disconnected', () => {
+    setStatus('انقطع الاتصال بسيرفر الوصل، جاري إعادة المحاولة…', 'warn');
+    if (peer && !peer.destroyed) peer.reconnect();
   });
 
   peer.on('call', (incoming) => {
@@ -463,9 +479,11 @@ async function startChannel(code) {
   peer.on('error', (err) => {
     if (err.type === 'unavailable-id') {
       peer.destroy();
-      joinChannel(code);
+      openPeerAsJoin(code);
     } else if (err.type === 'peer-unavailable') {
       setStatus('لم يتم العثور على الطرف الآخر بعد', 'warn');
+    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
+      scheduleReconnect(() => openPeerAsHost(code));
     } else {
       setStatus('خطأ في الشبكة: ' + err.type, 'err');
     }
@@ -473,19 +491,50 @@ async function startChannel(code) {
 }
 
 function joinChannel(code) {
+  currentCode = code;
+  currentRole = 'join';
+  openPeerAsJoin(code);
+}
+
+function openPeerAsJoin(code) {
   peer = new Peer({
     config: { iceServers: ICE_SERVERS }
   });
 
   peer.on('open', () => {
+    reconnectAttempts = 0;
     setStatus('جاري الانضمام إلى القناة ' + code + '…', 'warn');
     const outgoing = peer.call('lx1-' + code, localStream);
     wireCallEvents(outgoing);
   });
 
-  peer.on('error', (err) => {
-    setStatus('خطأ في الشبكة: ' + err.type, 'err');
+  peer.on('disconnected', () => {
+    setStatus('انقطع الاتصال بسيرفر الوصل، جاري إعادة المحاولة…', 'warn');
+    if (peer && !peer.destroyed) peer.reconnect();
   });
+
+  peer.on('error', (err) => {
+    if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
+      scheduleReconnect(() => openPeerAsJoin(code));
+    } else {
+      setStatus('خطأ في الشبكة: ' + err.type, 'err');
+    }
+  });
+}
+
+function scheduleReconnect(retryFn) {
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    setStatus('تعذر الاتصال بالشبكة بعد عدة محاولات — تحقق من اتصال الإنترنت', 'err');
+    return;
+  }
+  reconnectAttempts++;
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 15000);
+  setStatus('تعذر الاتصال، إعادة محاولة خلال ' + Math.round(delay / 1000) + ' ثانية… (' + reconnectAttempts + '/' + MAX_RECONNECT_ATTEMPTS + ')', 'warn');
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    if (peer && !peer.destroyed) peer.destroy();
+    retryFn();
+  }, delay);
 }
 
 connectBtn.addEventListener('click', () => {
@@ -514,6 +563,10 @@ function setMuted(muted) {
 muteBtn.addEventListener('click', () => setMuted(!isMuted));
 
 endBtn.addEventListener('click', () => {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectAttempts = 0;
+  currentCode = null;
+  currentRole = null;
   if (call) call.close();
   if (peer) peer.destroy();
   if (localStream) localStream.getTracks().forEach(t => t.stop());
