@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
   :root{
     --bg: #12140d;
@@ -264,6 +263,10 @@ for (let i = 0; i < BAR_COUNT; i++) {
 }
 const barEls = barsWrap.children;
 
+// عنوان سيرفر التعارف (Cloudflare Worker) — لازم تستبدله بعنوان
+// الـ Worker بتاعك بعد النشر (هيبقى شكله wss://اسم-الووركر.اسم-الحساب.workers.dev/ws)
+const SIGNALING_URL = 'wss://lasilky-signaling.shibinelqanater12.workers.dev/ws';
+
 // STUN بيحاول اتصال مباشر (سريع)، TURN بيشتغل كـ "ريلاي" احتياطي
 // لو الاتصال المباشر فشل (زي حالة الداتا/الواي فاي المختلطة).
 // دي credentials عامة مجانية من Open Relay (Metered) — تكفي للتجربة،
@@ -287,8 +290,9 @@ const ICE_SERVERS = [
   }
 ];
 
-let peer = null;
-let call = null;
+let ws = null;
+let pc = null;
+let role = null; // 'host' or 'guest', يحدده السيرفر تلقائيًا
 let localStream = null;
 let audioCtx = null;
 let analyserLocal = null;
@@ -297,10 +301,10 @@ let animId = null;
 let isMuted = false;
 let connected = false;
 let currentCode = null;
-let currentRole = null; // 'host' or 'join'
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-let reconnectTimer = null;
+let wsReconnectAttempts = 0;
+const MAX_WS_RECONNECT = 5;
+let wsReconnectTimer = null;
+let stopReconnect = false;
 
 function setStatus(text, kind) {
   statusText.textContent = text;
@@ -430,111 +434,139 @@ function handleRemoteStream(stream) {
   }
 }
 
-function wireCallEvents(c) {
-  call = c;
-  call.on('stream', handleRemoteStream);
-  call.on('close', () => {
+function createPeerConnection() {
+  pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+  localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendSignal({ type: 'candidate', candidate: event.candidate });
+    }
+  };
+
+  pc.ontrack = (event) => {
+    handleRemoteStream(event.streams[0]);
+  };
+}
+
+function sendSignal(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
+  }
+}
+
+async function handleSignal(data) {
+  if (data.type === 'welcome') {
+    role = data.role;
+    createPeerConnection();
+    return;
+  }
+
+  if (data.type === 'peer-joined') {
+    if (role === 'host' && pc) {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      sendSignal({ type: 'offer', sdp: pc.localDescription });
+    }
+    setStatus('جاري إنشاء الاتصال…', 'warn');
+    return;
+  }
+
+  if (data.type === 'offer' && pc) {
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    sendSignal({ type: 'answer', sdp: pc.localDescription });
+    return;
+  }
+
+  if (data.type === 'answer' && pc) {
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    return;
+  }
+
+  if (data.type === 'candidate' && pc) {
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+    } catch (e) {
+      // مرشح متأخر أو غير صالح، تجاهل
+    }
+    return;
+  }
+
+  if (data.type === 'peer-left') {
     connected = false;
     peerCountLabel.textContent = '—';
     setLed(null);
-    setStatus('انتهى الاتصال بالطرف الآخر', 'warn');
-  });
-  call.on('error', () => {
-    setStatus('حدث خطأ في الاتصال', 'err');
-  });
+    setStatus('انتهى الاتصال بالطرف الآخر — بانتظار انضمامه تاني…', 'warn');
+    if (pc) { pc.close(); }
+    createPeerConnection();
+    return;
+  }
+
+  if (data.type === 'room-full') {
+    stopReconnect = true;
+    setStatus('القناة دي مستخدمة بالفعل من طرفين — جرب رقم قناة مختلف', 'err');
+    return;
+  }
 }
 
 async function startChannel(code) {
   currentCode = code;
-  currentRole = 'host';
+  stopReconnect = false;
   const ok = await getMic();
   if (!ok) return;
 
   setStatus('جاري الاتصال بالقناة ' + code + '…', 'warn');
   goRadioView(code);
   setupAnalysers();
-  openPeerAsHost(code);
+  connectSignaling(code);
 }
 
-function openPeerAsHost(code) {
-  peer = new Peer('lx1-' + code, {
-    config: { iceServers: ICE_SERVERS }
-  });
+function connectSignaling(code) {
+  ws = new WebSocket(SIGNALING_URL + '?room=' + encodeURIComponent(code));
 
-  peer.on('open', () => {
-    reconnectAttempts = 0;
+  ws.addEventListener('open', () => {
+    wsReconnectAttempts = 0;
     setStatus('بانتظار انضمام الطرف الآخر…', 'warn');
   });
 
-  peer.on('disconnected', () => {
-    setStatus('انقطع الاتصال بسيرفر الوصل، جاري إعادة المحاولة…', 'warn');
-    if (peer && !peer.destroyed) peer.reconnect();
-  });
-
-  peer.on('call', (incoming) => {
-    incoming.answer(localStream);
-    wireCallEvents(incoming);
-  });
-
-  peer.on('error', (err) => {
-    if (err.type === 'unavailable-id') {
-      peer.destroy();
-      openPeerAsJoin(code);
-    } else if (err.type === 'peer-unavailable') {
-      setStatus('لم يتم العثور على الطرف الآخر بعد', 'warn');
-    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
-      scheduleReconnect(() => openPeerAsHost(code));
-    } else {
-      setStatus('خطأ في الشبكة: ' + err.type, 'err');
+  ws.addEventListener('message', (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (e) {
+      return;
     }
-  });
-}
-
-function joinChannel(code) {
-  currentCode = code;
-  currentRole = 'join';
-  openPeerAsJoin(code);
-}
-
-function openPeerAsJoin(code) {
-  peer = new Peer({
-    config: { iceServers: ICE_SERVERS }
+    handleSignal(data);
   });
 
-  peer.on('open', () => {
-    reconnectAttempts = 0;
-    setStatus('جاري الانضمام إلى القناة ' + code + '…', 'warn');
-    const outgoing = peer.call('lx1-' + code, localStream);
-    wireCallEvents(outgoing);
-  });
-
-  peer.on('disconnected', () => {
-    setStatus('انقطع الاتصال بسيرفر الوصل، جاري إعادة المحاولة…', 'warn');
-    if (peer && !peer.destroyed) peer.reconnect();
-  });
-
-  peer.on('error', (err) => {
-    if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
-      scheduleReconnect(() => openPeerAsJoin(code));
-    } else {
-      setStatus('خطأ في الشبكة: ' + err.type, 'err');
+  ws.addEventListener('close', () => {
+    if (stopReconnect || !currentCode) return;
+    if (connected) {
+      connected = false;
+      peerCountLabel.textContent = '—';
+      setLed(null);
     }
+    scheduleWsReconnect(code);
+  });
+
+  ws.addEventListener('error', () => {
+    // 'close' هيتنفذ بعده وهيتولى إعادة المحاولة
   });
 }
 
-function scheduleReconnect(retryFn) {
-  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    setStatus('تعذر الاتصال بالشبكة بعد عدة محاولات — تحقق من اتصال الإنترنت', 'err');
+function scheduleWsReconnect(code) {
+  if (wsReconnectAttempts >= MAX_WS_RECONNECT) {
+    setStatus('تعذر الاتصال بسيرفر الوصل بعد عدة محاولات — تحقق من اتصال الإنترنت', 'err');
     return;
   }
-  reconnectAttempts++;
-  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 15000);
-  setStatus('تعذر الاتصال، إعادة محاولة خلال ' + Math.round(delay / 1000) + ' ثانية… (' + reconnectAttempts + '/' + MAX_RECONNECT_ATTEMPTS + ')', 'warn');
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(() => {
-    if (peer && !peer.destroyed) peer.destroy();
-    retryFn();
-  }, delay);
+  wsReconnectAttempts++;
+  const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts - 1), 15000);
+  setStatus('انقطع الاتصال، إعادة محاولة خلال ' + Math.round(delay / 1000) + ' ثانية… (' + wsReconnectAttempts + '/' + MAX_WS_RECONNECT + ')', 'warn');
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+  wsReconnectTimer = setTimeout(() => connectSignaling(code), delay);
 }
 
 connectBtn.addEventListener('click', () => {
@@ -563,12 +595,13 @@ function setMuted(muted) {
 muteBtn.addEventListener('click', () => setMuted(!isMuted));
 
 endBtn.addEventListener('click', () => {
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-  reconnectAttempts = 0;
+  stopReconnect = true;
+  if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+  wsReconnectAttempts = 0;
   currentCode = null;
-  currentRole = null;
-  if (call) call.close();
-  if (peer) peer.destroy();
+  role = null;
+  if (pc) { pc.close(); pc = null; }
+  if (ws) { ws.close(); ws = null; }
   if (localStream) localStream.getTracks().forEach(t => t.stop());
   if (animId) cancelAnimationFrame(animId);
   if (audioCtx) audioCtx.close();
