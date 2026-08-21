@@ -259,6 +259,29 @@ for (let i = 0; i < BAR_COUNT; i++) {
 }
 const barEls = barsWrap.children;
 
+// STUN بيحاول اتصال مباشر (سريع)، TURN بيشتغل كـ "ريلاي" احتياطي
+// لو الاتصال المباشر فشل (زي حالة الداتا/الواي فاي المختلطة).
+// دي credentials عامة مجانية من Open Relay (Metered) — تكفي للتجربة،
+// وبعدين تقدر تستبدلها بحساب خاص بيك لو حبيت أضمن واستقرار أكتر.
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  }
+];
+
 let peer = null;
 let call = null;
 let localStream = null;
@@ -389,7 +412,7 @@ async function startChannel(code) {
   setupAnalysers();
 
   peer = new Peer('lx1-' + code, {
-    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+    config: { iceServers: ICE_SERVERS }
   });
 
   peer.on('open', () => {
@@ -415,7 +438,7 @@ async function startChannel(code) {
 
 function joinChannel(code) {
   peer = new Peer({
-    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+    config: { iceServers: ICE_SERVERS }
   });
 
   peer.on('open', () => {
