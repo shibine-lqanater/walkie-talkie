@@ -320,6 +320,9 @@ async function getMic() {
 
 function setupAnalysers() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
   if (localStream) {
     const src = audioCtx.createMediaStreamSource(localStream);
     analyserLocal = audioCtx.createAnalyser();
@@ -335,6 +338,14 @@ function attachRemoteAnalyser(stream) {
   analyserRemote = audioCtx.createAnalyser();
   analyserRemote.fftSize = 64;
   src.connect(analyserRemote);
+  // نمرر الصوت عبر Web Audio API عشان نضمن إنه يخرج من السماعة
+  // الخارجية بمستوى صوت الميديا العادي، مش سماعة الأذن الداخلية
+  // اللي بيستخدمها بعض متصفحات الأندرويد تلقائيًا مع صوت الميكروفون
+  // (لأنه بيتعامل معاه كأنه "مكالمة صوتية" مش صوت ميديا عادي).
+  src.connect(audioCtx.destination);
+  // نكتم عنصر <audio> نفسه عشان ميحصلش صدى/تكرار للصوت،
+  // لأن التشغيل الفعلي بقى عن طريق audioCtx.destination فوق.
+  remoteAudio.muted = true;
 }
 
 function avgLevel(analyser) {
