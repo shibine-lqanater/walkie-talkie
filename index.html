@@ -335,7 +335,7 @@ async function getMic() {
 function setupAnalysers() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
+    audioCtx.resume().catch(() => {});
   }
   if (localStream) {
     const src = audioCtx.createMediaStreamSource(localStream);
@@ -415,22 +415,39 @@ function handleRemoteStream(stream) {
   setLed('on');
   setStatus('الخط مفتوح — كلام مباشر', null);
 
-  // محاولة تشغيل صريحة — لو المتصفح رفض (سياسة autoplay)، نبلغ المستخدم
-  // إنه لازم يضغط على الشاشة عشان يفعّل الصوت.
-  const playPromise = remoteAudio.play();
-  if (playPromise !== undefined) {
-    playPromise.catch(() => {
-      setStatus('اضغط على الشاشة لتفعيل الصوت', 'warn');
-      const unlock = () => {
-        remoteAudio.play().then(() => {
-          setStatus('الخط مفتوح — كلام مباشر', null);
-        }).catch(() => {});
-        document.removeEventListener('click', unlock);
-        document.removeEventListener('touchstart', unlock);
-      };
-      document.addEventListener('click', unlock, { once: true });
-      document.addEventListener('touchstart', unlock, { once: true });
+  // الصوت الفعلي بيخرج من audioCtx.destination (شوف attachRemoteAnalyser)،
+  // فآلية "فك القفل" لازم تستهدف audioCtx.resume() مش عنصر <audio> نفسه
+  // (اللي هو muted أصلاً). بنجرب الاتنين مع بعض عشان نغطي كل الحالات.
+  const needsUnlock = () => (audioCtx && audioCtx.state === 'suspended');
+
+  const tryPlay = () => {
+    const resumePromise = audioCtx ? audioCtx.resume() : Promise.resolve();
+    const playPromise = remoteAudio.play();
+    return Promise.all([resumePromise, playPromise]);
+  };
+
+  tryPlay()
+    .then(() => {
+      if (!needsUnlock()) setStatus('الخط مفتوح — كلام مباشر', null);
+    })
+    .catch(() => {
+      // فشل واحد على الأقل (غالبًا audioCtx.resume() بسبب autoplay policy)
     });
+
+  // نتأكد كمان من حالة الـ AudioContext مباشرة، مش بس نتيجة play()
+  if (needsUnlock()) {
+    setStatus('اضغط على الشاشة لتفعيل الصوت', 'warn');
+    const unlock = () => {
+      tryPlay()
+        .then(() => {
+          setStatus('الخط مفتوح — كلام مباشر', null);
+        })
+        .catch(() => {});
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('touchstart', unlock);
+    };
+    document.addEventListener('click', unlock, { once: true });
+    document.addEventListener('touchstart', unlock, { once: true });
   }
 }
 
