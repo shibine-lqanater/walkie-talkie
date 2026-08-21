@@ -199,6 +199,10 @@
     <div class="channel-code" id="channelDisplay">----</div>
     <div class="status-text" id="statusText">جاهز للاتصال</div>
     <div id="bars"></div>
+    <div class="screen-row" style="margin-top:8px; margin-bottom:0;">
+      <span class="screen-label">مستوى الوارد (تشخيص)</span>
+      <span class="screen-label" id="remoteLevelLabel" style="color:var(--green); font-family:'Share Tech Mono',monospace;">0</span>
+    </div>
   </div>
 
   <div id="setupView" class="setup">
@@ -252,6 +256,7 @@ const muteIcon = document.getElementById('muteIcon');
 const muteLabel = document.getElementById('muteLabel');
 const remoteAudio = document.getElementById('remoteAudio');
 const barsWrap = document.getElementById('bars');
+const remoteLevelLabel = document.getElementById('remoteLevelLabel');
 
 const BAR_COUNT = 28;
 for (let i = 0; i < BAR_COUNT; i++) {
@@ -360,6 +365,8 @@ function avgLevel(analyser) {
 function drawLoop() {
   const localLevel = isMuted ? 0 : avgLevel(analyserLocal);
   const remoteLevel = avgLevel(analyserRemote);
+  remoteLevelLabel.textContent = Math.round(remoteLevel);
+  remoteLevelLabel.style.color = remoteLevel > 8 ? 'var(--red)' : 'var(--muted)';
   const speaking = localLevel > 14 && localLevel >= remoteLevel;
   const source = speaking ? analyserLocal : analyserRemote;
 
