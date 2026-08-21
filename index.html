@@ -387,6 +387,24 @@ function handleRemoteStream(stream) {
   peerCountLabel.textContent = '2 متصلين';
   setLed('on');
   setStatus('الخط مفتوح — كلام مباشر', null);
+
+  // محاولة تشغيل صريحة — لو المتصفح رفض (سياسة autoplay)، نبلغ المستخدم
+  // إنه لازم يضغط على الشاشة عشان يفعّل الصوت.
+  const playPromise = remoteAudio.play();
+  if (playPromise !== undefined) {
+    playPromise.catch(() => {
+      setStatus('اضغط على الشاشة لتفعيل الصوت', 'warn');
+      const unlock = () => {
+        remoteAudio.play().then(() => {
+          setStatus('الخط مفتوح — كلام مباشر', null);
+        }).catch(() => {});
+        document.removeEventListener('click', unlock);
+        document.removeEventListener('touchstart', unlock);
+      };
+      document.addEventListener('click', unlock, { once: true });
+      document.addEventListener('touchstart', unlock, { once: true });
+    });
+  }
 }
 
 function wireCallEvents(c) {
@@ -458,6 +476,10 @@ connectBtn.addEventListener('click', () => {
     setStatus('أدخل رقم قناة من 4 أرقام على الأقل', 'err');
     return;
   }
+  // بعض متصفحات الموبايل بتمنع تشغيل الصوت تلقائيًا إلا لو تم تفعيله
+  // مباشرة بعد ضغطة من المستخدم — الضغطة دي "بتفتح" عنصر الصوت.
+  remoteAudio.muted = false;
+  remoteAudio.play().catch(() => {});
   startChannel(code);
 });
 
